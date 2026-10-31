@@ -406,9 +406,21 @@ AXUIElementRef get_raisable_window(AXUIElementRef _element, CGPoint point, int c
                     CFEqual(_element_role, kAXMenuBarItemRole)) {
                     CFRelease(_element_role);
                     CFRelease(_element);
+                } else if (CFEqual(_element_role, kAXSheetRole)) {
+                    CFRelease(_element_role);
+                    // A sheet (a close or save alert) is raised with the window it is
+                    // attached to, and is never a main window itself, so resolve it to
+                    // that window rather than excluding it.
+                    AXUIElementRef _parent = NULL;
+                    AXUIElementCopyAttributeValue(_element, kAXParentAttribute, (CFTypeRef *) &_parent);
+                    if (_parent) {
+                        CFRelease(_element);
+                        _window = get_raisable_window(_parent, point, ++count);
+                    } else {
+                        _window = _element;
+                    }
                 } else if (
                     CFEqual(_element_role, kAXWindowRole) ||
-                    CFEqual(_element_role, kAXSheetRole) ||
                     CFEqual(_element_role, kAXDrawerRole)) {
                     CFRelease(_element_role);
                     _window = _element;
@@ -687,7 +699,24 @@ inline bool is_main_window(AXUIElementRef _app, AXUIElementRef _window, bool chr
 
     main_window = main_window || (!finder_app && is_full_screen(_window));
 
-    if (verbose && !main_window) { NSLog(@"Not a main window"); }
+    if (verbose && !main_window) {
+        pid_t pid = 0;
+        AXUIElementGetPid(_window, &pid);
+        CGWindowID window_id = kCGNullWindowID;
+        _AXUIElementGetWindow(_window, &window_id);
+        CFTypeRef _role = NULL, _sub_role = NULL;
+        AXUIElementCopyAttributeValue(_window, kAXRoleAttribute, &_role);
+        AXUIElementCopyAttributeValue(_window, kAXSubroleAttribute, &_sub_role);
+        CGPoint position = CGPointZero;
+        CGSize size = CGSizeZero;
+        windowPosition(_window, &position);
+        windowSize(_window, &size);
+        NSLog(@"Not a main window: %@ (pid %d), window %u, role %@, subrole %@, frame (%.0f, %.0f, %.0f, %.0f)",
+            [NSRunningApplication runningApplicationWithProcessIdentifier: pid].localizedName, pid,
+            window_id, _role, _sub_role, position.x, position.y, size.width, size.height);
+        if (_role) { CFRelease(_role); }
+        if (_sub_role) { CFRelease(_sub_role); }
+    }
     return main_window;
 }
 
